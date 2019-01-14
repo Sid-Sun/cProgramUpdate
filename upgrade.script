@@ -1,0 +1,61 @@
+buildBinary(){
+    curl -s {upstream source code URL} > /tmp/{source code file name}.c
+    cd /tmp/
+    read -r -p "Which compiler do you want to use? [gcc/clang] " response
+    if [[ "$response" =~ ^([gG][cC][cC]|[gG])+$ ]]
+    then
+        gcc -o {binary name(temp)} {curled source code file name}
+    else
+        clang -o {binary name(temp)} {curled source code file name}
+    fi
+}
+replaceBinary(){
+    export savedGroup=$(ls -l $pathToBinary | awk '{print $4}') #save group so we can chown later on and apply the previous group, do it before check as we need to store it on either cases
+    export savedPermissions=$(stat -c "%a %n" $pathToBinary | awk '{print $1}'); #Save file permissions too; in case user uses something other than 755.
+    if [[ $(ls -l $pathToBinary | awk '{print $3}') == $USER ]] #Check if current user owns the binary
+    then
+        mv /tmp/{compiled binary name} $pathToBinary #Since the current user owns the binary, they should be able to replace it.
+        chmod $savedPermissions $pathToBinary
+        if [[ $USER != $savedGroup ]]
+        then
+            chown :$savedGroup $pathToBinary
+        fi
+        echo "Upgrade completed."
+    else
+        read -r -p "The binary file is not owned by "$USER", do you wish to try with superuser privileges? (y/n): " response
+        if [[ "$response" =~ ^([yY][eE][sS]|[yY])+$ ]]
+        then
+            sudo mv /tmp/{compiled binary name} $pathToBinary
+            sudo chmod $savedPermissions $pathToBinary
+            sudo chown :$savedGroup $pathToBinary
+            echo "Upgrade completed successfully if the superuser privileges were granted."
+        else
+            echo "Upgrade aborted."
+        fi
+    fi
+    rm -f /tmp/{compiled source code file name}.c #Remove the cloned source regardless of the upgrade succeeding.
+}
+export upstreamVersion=$(curl -s {upstream version number URL (just a file with vX.X.X)} | cat)
+if [[ $currentlyInstalledVersion != $upstreamVersion ]]
+then
+    read -r -p "Update to "$upstreamVersion" is available, installed version is "$currentlyInstalledVersion" do you want to upgrade now? (y/n): " response
+    if [[ "$response" =~ ^([yY][eE][sS]|[yY])+$ ]]
+    then
+        export checkAliased=$(type $calledCommand | awk '{print $3}')
+        if [[ $checkAliased == "aliased" ]]
+        then
+            export pathToBinary=$(readlink -f $(type $calledCommand | awk '{print $5}')) #Entertain the possibility that the alias could point to a symlink
+            buildBinary
+            replaceBinary
+        else
+            export pathToBinary=$(readlink -f $checkAliased) #Consider that the now confirmed to be, 'non-alias' file could be a symlink and thus be sure to get the binary file path
+            buildBinary
+            replaceBinary
+        fi
+    else
+        echo "Okay, Just run "$calledCommand" with --upgrade argument again whenever you wish to upgrade."
+    fi
+else
+    echo "You are running the latest version, "$currentlyInstalledVersion
+fi
+exit
